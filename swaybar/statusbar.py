@@ -82,7 +82,6 @@ class Bar:
         return id
 
     def handle_signal(self, _signum, _frame):
-        print('lel')
         self._should_exit = True
 
     async def oversee(self):
