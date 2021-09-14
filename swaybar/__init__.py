@@ -1,1 +1,1 @@
-from .statusbar import Bar, Module
+from .statusbar import Bar, Module, ClickEvent
