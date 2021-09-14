@@ -35,10 +35,13 @@ class Module:
         """ This method is called when the module is clicked. """
         pass
 
-    def hide(self):
+    def hide(self, sync=False):
         """ Hides the module from the bar.  """
         try:
             self._bar.output.pop(self._id)
+            # Immediatelly remove it from the output if sync is True.
+            if sync:
+                self._bar.print_status()
         except KeyError:
             pass
 
