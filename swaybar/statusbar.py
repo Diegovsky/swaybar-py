@@ -5,14 +5,28 @@ import sys
 import random
 import signal
 import string
+from dataclasses import dataclass
+from dataclasses_json import dataclass_json, Undefined
+from typing import Optional, Union 
+import aioconsole
 
-import collections
+Number = Union[int, float]
 
+# This will ignore any non specified fields.
+@dataclass_json(undefined=Undefined.EXCLUDE)
+@dataclass
+class ClickEvent:
+    name: str
+    x: Number 
+    y: Number
+    button: int
+    event: int
+    relative_x: Number
+    relative_y: Number
+    width: Number
+    height: Number
+    instance: Optional[str] = None
 
-ClickEvent = collections.namedtuple('ClickEvent',
-    ['name', 'instance', 'x', 'y', 'button', 'event',
-     'relative_x', 'relative_y', 'width', 'height']
-)
 
 class Module:
     def __init__(self, bar: 'Bar'):
@@ -25,13 +39,13 @@ class Module:
             You must override this."""
         raise NotImplemented
 
-    def print(self, text, sync=True):
+    def print(self, text, sync=True) -> None:
         """ Outputs text to the bar. """
         self._bar.output[self._id] = text
         if sync:
             self._bar.print_status()
 
-    async def mouse_event(self, info: ClickEvent):
+    async def mouse_event(self, info: ClickEvent) -> None:
         """ This method is called when the module is clicked. """
         pass
 
@@ -51,29 +65,30 @@ class Bar:
     __CHARTABLE = string.ascii_letters + string.digits
 
     def __init__(self):
-        self.modules: list[Module] = []
+        self.modules: dict[str, Module] = {}
         self.output: dict[str, str] = {}
         self._should_exit = False
         self.tasks: list[asyncio.Task]
+        self.instance = Bar.__gen_id()
 
     def print_status(self):
         body = []
-        for element in self.output.values():
+        for id, element in self.output.items():
             if type(element) is not list:
                 element = [element]
             for val in element:
-                body.append(dict(full_text=val, urgent=False))
+                body.append(dict(full_text=val, urgent=False, name=id))
         
         sys.stdout.write(json.dumps(body)+',')
         sys.stdout.flush()
 
     def add_module(self, cls):
-        self.modules.append(cls(self))
+        module = cls(self)
+        self.modules[module._id] = module
 
     @classmethod
     def __gen_id(cls):
         return ''.join(random.choices(cls.__CHARTABLE, k=cls.ID_LEN))
-
 
     def reserve_id(self):
         id = ''
@@ -85,17 +100,34 @@ class Bar:
         return id
 
     def handle_signal(self, _signum, _frame):
-        self._should_exit = True
+        for task in self.tasks:
+            task.cancel()
+        return
 
     async def oversee(self):
-        while True:
-            if self._should_exit:
-                for task in self.tasks:
-                    task.cancel()
-                return
-            else:
-                await asyncio.sleep(1)
+        """ Reads stdin to receive swaybar click events. """
+        try:
+            while True:
+                line = await aioconsole.ainput()
+                line = line.strip()
+                # swaybar also sends an infinite array of events.
+                if line == '[':
+                    continue
+                try:
+                    # Remove trailing comma if it is there.
+                    line = line if line[0] != ',' else line[1:]
+                    evt = ClickEvent.from_json(line)
+                    try:
+                        await self.modules[evt.name].mouse_event(evt)
+                    except KeyError:
+                        pass
+                except json.JSONDecodeError:
+                    pass
 
+        # If stdin is closed, quit.
+        except EOFError:
+            return
+               
     async def _run(self):
         """ Starts the main event loop.
             Also, installs signal handlers for SIGINT """
@@ -113,15 +145,13 @@ class Bar:
         lambda module: self._loop.create_task(
                 module.run(),
                 name=module.__class__.__name__,
-            ),
-        self.modules))
-        overseer = asyncio.shield(self.oversee())
+            ), self.modules.values()))
+        self.tasks.append(asyncio.create_task(self.oversee(), name='overseer'))
         for task in self.tasks:
             try:
                 await task
             except CancelledError:
                 pass
-        await overseer
 
     def run(self):
         asyncio.run(self._run())
