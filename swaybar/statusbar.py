@@ -39,6 +39,13 @@ class Module:
             You must override this."""
         raise NotImplemented
 
+    async def _run(self):
+        """ This method calls `self.run` and prevents exceptions from messing with the bar."""
+        try:
+            await self.run()
+        except Exception as e:
+            self.print("An exception '{}' has occoured.".format(repr(e)))
+
     def print(self, text, sync=True) -> None:
         """ Outputs text to the bar. """
         self._bar.output[self._id] = text
@@ -143,7 +150,7 @@ class Bar:
         sys.stdout.write('[')
         self.tasks = list(map(
         lambda module: self._loop.create_task(
-                module.run(),
+                module._run(),
                 name=module.__class__.__name__,
             ), self.modules.values()))
         self.tasks.append(asyncio.create_task(self.oversee(), name='overseer'))
